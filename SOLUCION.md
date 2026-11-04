@@ -31,14 +31,16 @@ El registro de contratos vigentes murió el 30 de mayo de 2026 con la salida de 
 
 ## 3. Ciclo del agente
 
-El ciclo es propio (`src/core/agente.ts`, menos de 200 líneas) y no depende del proveedor. Se agrega el mensaje del usuario a la sesión, cuyo historial solo crece. Luego se llama al modelo vía `AdaptadorLLM.enviar(mensajes, herramientas)`, se validan con zod los argumentos de cada herramienta, se ejecuta y se devuelve el resultado al modelo. Esto se repite hasta que el modelo responde sin herramientas. Cada llamada se emite al chat por SSE.
+El ciclo es propio (`src/core/agente.ts`, unas 200 líneas) y no depende del proveedor. Se agrega el mensaje del usuario a la sesión, cuyo historial solo crece. Luego se llama al modelo vía `AdaptadorLLM.enviar(mensajes, herramientas)`, se validan con zod los argumentos de cada herramienta, se ejecuta y se devuelve el resultado al modelo. Esto se repite hasta que el modelo responde sin herramientas. Cada llamada se emite al chat por SSE.
 
 **Topes.** Hay un máximo de 25 rondas por turno. En la última, se le pide al modelo cerrar con lo que tiene y lo que falta. También hay un tope de tokens por sesión y un timeout al proveedor; los tres son configurables.
 
 **Revisión humana (CA3 y RN5), en tres capas:**
 1. **La herramienta decide.** `contratos_validar` y `contratos_registrar` marcan `confirmacion` cuando hay campos con confianza < 0,8 o conflictos con el maestro. `contratos_registrar` no escribe sin `confirmado: true`.
-2. **El backend garantiza.** `confirmado: true` solo se acepta si el mensaje anterior del usuario es una confirmación explícita, sin negación ("confirmo el valor 0 y la fecha fin 2027-08-31" sí cuenta). Si el modelo lo usa por su cuenta, el backend lo bloquea.
+2. **El backend garantiza, por acción.** `confirmado: true` solo se acepta si el mensaje anterior del usuario es una confirmación explícita, sin negación ("confirmo el valor 0 y la fecha fin 2027-08-31" sí cuenta). Si el modelo lo usa por su cuenta, el backend lo bloquea.
 3. **Al registrar, el modelo solo puede cambiar campos de baja confianza.** Los demás deben coincidir con lo extraído del documento: el modelo propone y la analista confirma, pero nadie altera lo que el documento dice con claridad.
+
+**Confirmación ligada a la acción.** Cada confirmación queda asociada a la acción que la pidió; una validación puede declarar qué acción habilita (contratos_validar habilita contratos_registrar). Así, un "sí" a otra pregunta nunca autoriza una acción distinta. El ajuste surgió de una prueba real en el reto 01 y se aplicó al núcleo de los tres retos.
 
 **Errores (CA5 y HU-6).** Un mensaje malo devuelve `{ ok: false, error }` y el lote sigue. En la prueba real, cuando se agotó la cuota gratuita, el chat mostró *"Se alcanzó el límite de uso gratuito… espera un minuto"* y la sesión siguió viva.
 

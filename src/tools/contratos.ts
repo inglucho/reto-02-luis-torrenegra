@@ -108,7 +108,8 @@ export const validar = {
         return JSON.stringify({
           ok: true,
           data,
-          confirmacion: { motivo: `Revisar antes de registrar: ${validacion.requiere_revision.join(", ")}` },
+          // La revisión confirmada habilita `contratos_registrar` en el siguiente turno.
+          confirmacion: { motivo: `Revisar antes de registrar: ${validacion.requiere_revision.join(", ")}`, accion: "registrar" },
         });
       }
       return ok(data);
