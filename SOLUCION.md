@@ -6,22 +6,9 @@ El registro de contratos vigentes murió el 30 de mayo de 2026 con la salida de 
 
 ## 2. Arquitectura
 
-```
-┌──────────── web/ (chat) ─────────────┐   POST /api/chat    ┌──────────── src/server.ts ────────────┐
-│ historial · tarjetas de herramientas │ ──────────────────▶ │ sesiones en memoria · SSE             │
-│ turno resaltado si pide revisión     │ ◀── SSE: texto,     │  src/core/agente.ts (ciclo del agente)│
-│ botones Confirmo / No, cancela       │   llamada, resultado│   tope de iteraciones y de tokens     │
-└──────────────────────────────────────┘   fin_turno         │   guardia de confirmación (CA3)       │
-                                                             └───┬───────────────┬───────────────────┘
-                                          src/llm/adapter.ts ◀───┘               ▼
-                                          gemini.ts · anthropic.ts   src/tools/contratos.ts (contratos_*)
-                                                                                 │  log por ejecución → out/log.jsonl
-                     src/contratos/  texto · extracción · clasificación · registro · alertas · csv
-                                                                                 │
-              fixtures/reto-02 (lectura): buzon/, maestro-contratos.csv, comerciales.json
-              out/ (escritura): sharepoint/{maestro-contratos.csv, historial.jsonl, Contratos/<año>/<cliente>/},
-                                procesados.json, alertas.md, log.jsonl
-```
+![Arquitectura del agente](docs/arquitectura.svg)
+
+*El diagrama muestra las capas (chat, API, ciclo del agente, herramientas, lógica y datos), el proveedor de IA, la verificación sin modelo (`demo.ts`) y el flujo numerado de un mensaje.*
 
 | Capa | Dónde | Qué contiene |
 |---|---|---|
