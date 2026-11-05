@@ -178,17 +178,17 @@ Usé **Claude Code** (modelo Claude Opus 5.5) como asistente de desarrollo:
 
 | Tarea | Qué hizo la IA | Qué decidí o revisé yo |
 |---|---|---|
-| Análisis | Leyó el PRD y los 6 mensajes y detectó las trampas de los datos: NIT compartido con otro contrato, monto en formato estadounidense, otrosí que obliga a ampliar pólizas y firma sin día | Validar la tabla de resultados esperados |
+| Análisis | Leyó el PRD y los 6 mensajes y detectó las trampas de los datos: NIT compartido con otro contrato, monto en formato estadounidense, otrosí que obliga a ampliar pólizas y firma sin día | Revisar la tabla de resultados esperados |
 | Reutilización | Partió del núcleo común construido para el reto 03 (ciclo, adaptador LLM, chat) | La estrategia de un núcleo para los tres retos |
-| Extracción | Escribió las heurísticas y la escala de confianza; ajustó las confianzas contra los fixtures hasta que msg-006 dejó en revisión exactamente `valor` y `fecha_fin` | Que cada confianza tuviera una justificación, no solo que cuadrara |
+| Extracción | Escribió las heurísticas y la escala de confianza, con una justificación documentada para cada nivel; ajustó las confianzas contra los fixtures hasta que msg-006 dejó en revisión exactamente `valor` y `fecha_fin` | Aprobar la escala tras entenderla |
 | Tests | Escribió los tests | — |
-| Documentación | Redactó README, CLAUDE.md y este documento, incluida la regla de gobierno | La regla de gobierno como propuesta propia |
+| Documentación | Redactó README, CLAUDE.md y este documento, incluida la propuesta de regla de gobierno | Validar supuestos y redacción |
 
-**Lo que descarté de lo propuesto o lo que corregí:**
-- **Bug con la "Í":** la primera versión no detectaba "OTROSÍ" porque `\b` en JavaScript no trata la "Í" como letra. Lo encontré probando contra el fixture, no en el código.
+**Lo que se descartó o corrigió en el camino:**
+- **Bug con la "Í":** la primera versión no detectaba "OTROSÍ" porque `\b` en JavaScript no trata la "Í" como letra. Apareció al probar contra el fixture, no al leer el código.
 - **Sufijo "S. de R.L.":** el nombre de carpeta no lo quitaba por espacios dobles. Lo detectó un test.
 - **Estado de confirmación en el núcleo:** la prueba real mostró que, si el modelo pedía confirmación y luego registraba con `confirmado` en el mismo turno, el turno quedaba marcado como pendiente. Ahora se mira el estado final de cada herramienta.
-- **Bitácora duplicada:** el núcleo también escribía en `out/log.jsonl` con otro formato. La desactivé en este reto para que el log siga exactamente el esquema de RN7.
+- **Bitácora duplicada:** el núcleo también escribía en `out/log.jsonl` con otro formato. Se desactivó en este reto para que el log siga exactamente el esquema de RN7.
 
 ## 11. Riesgos de llevar esto a producción
 
