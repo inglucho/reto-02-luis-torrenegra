@@ -16,6 +16,7 @@ import {
 import { registrarLog } from "../contratos/log";
 import { registrar as escribirRegistro } from "../contratos/registro";
 import { esFechaValida } from "../contratos/texto";
+import { MONEDAS, PAISES, UMBRAL_CONFIANZA } from "../contratos/tipos";
 
 /**
  * Herramientas del reto 02. El modelo las ve como `contratos_<export>`.
@@ -49,12 +50,27 @@ async function analizar(ctx: Contexto, mensajeId: string, contrato?: Record<stri
   return { correo, adjunto, extraido, correcciones, validacion };
 }
 
-const argContrato = z
-  .record(z.string(), z.unknown())
-  .optional()
-  .describe(
-    "Opcional. Valores del contrato confirmados por la analista, p. ej. { valor: 0, fecha_fin: '2027-08-31' }. Solo se pueden cambiar los campos de baja confianza.",
-  );
+/** Valores que confirma o corrige la analista. Solo se aplican a campos de baja confianza. */
+const ContratoSchema = z
+  .object({
+    id_contrato: z.string().describe("Número del contrato"),
+    cliente: z.string().describe("Razón social de la contraparte"),
+    nit_cliente: z.string().describe("Identificador tributario sin puntos ni dígito de verificación"),
+    pais: z.enum(PAISES).describe("País de la contraparte"),
+    objeto: z.string().max(200).describe("Objeto del contrato, máximo 200 caracteres"),
+    valor: z.number().nonnegative().describe("Valor sin separadores; 0 si es por demanda"),
+    moneda: z.enum(MONEDAS).describe("Moneda del valor"),
+    fecha_inicio: z.string().describe("Fecha de inicio YYYY-MM-DD"),
+    fecha_fin: z.string().describe("Fecha de fin YYYY-MM-DD"),
+    requiere_poliza: z.boolean().describe("Si el contrato exige póliza"),
+    tipo_poliza: z.string().describe("Tipos de póliza separados por ;"),
+  })
+  .partial()
+  .strict();
+
+const argContrato = ContratoSchema.optional().describe(
+  "Opcional. Valores confirmados o corregidos por la analista, p. ej. { valor: 0, fecha_fin: '2027-08-31' }. Solo se pueden cambiar los campos de baja confianza.",
+);
 
 export const leer_buzon = {
   description: "Lista los mensajes del buzón que aún no se han procesado, indicando si traen contrato.",
@@ -63,22 +79,13 @@ export const leer_buzon = {
     return ejecutar(ctx, "leer_buzon", null, async () => {
       const procesados = await leerProcesados(ctx.directory);
       const pendientes = (await listarMensajes(ctx.directory)).filter((id) => !procesados[id]);
-      const mensajes = await Promise.all(
-        pendientes.map(async (id) => {
-          const correo = await leerCorreo(ctx.directory, id);
-          const tiene_contrato = (await adjuntoContrato(ctx.directory, correo)) !== null;
-          return {
-            id,
-            de: correo.de,
-            asunto: correo.asunto,
-            fecha: correo.fecha,
-            adjuntos: correo.adjuntos,
-            tiene_contrato,
-            ...(tiene_contrato ? {} : { clasificacion: "rechazado", motivo: "No trae contrato ni otrosí adjunto." }),
-          };
-        }),
+      // HU-6: un mensaje ilegible se reporta como rechazado con su motivo; el resto del buzón sigue.
+      const mensajes = await Promise.all(pendientes.map((id) => describirMensaje(ctx, id)));
+      const conContrato = mensajes.filter((m) => m.tiene_contrato).length;
+      return ok(
+        { mensajes, ya_procesados: Object.keys(procesados).length },
+        `${mensajes.length} mensajes pendientes · ${conContrato} con contrato u otrosí · ${mensajes.length - conContrato} sin contrato`,
       );
-      return ok({ mensajes, ya_procesados: Object.keys(procesados).length });
     });
   },
 };
@@ -91,7 +98,13 @@ export const extraer = {
       const correo = await leerCorreo(ctx.directory, args.mensaje_id);
       const adjunto = await adjuntoContrato(ctx.directory, correo);
       if (!adjunto) return fallo(`El mensaje ${args.mensaje_id} no trae contrato ni otrosí (adjuntos: ${correo.adjuntos.join(", ") || "ninguno"}).`);
-      return ok({ ...extraerTexto(args.mensaje_id, adjunto.texto), documento: adjunto.nombre });
+      const contrato = extraerTexto(args.mensaje_id, adjunto.texto);
+      const dudosos = Object.entries(contrato.campos).filter(([, c]) => c.confianza < UMBRAL_CONFIANZA).map(([n]) => n);
+      const c = contrato.campos;
+      return ok(
+        { ...contrato, documento: adjunto.nombre },
+        `${contrato.tipo_documento === "otrosi" ? "Otrosí" : "Contrato"} ${c.id_contrato.valor ?? "sin número"} · ${c.cliente.valor ?? "cliente sin identificar"}${dudosos.length > 0 ? ` · baja confianza: ${dudosos.join(", ")}` : " · todos los campos con confianza alta"}`,
+      );
     });
   },
 };
@@ -108,11 +121,12 @@ export const validar = {
         return JSON.stringify({
           ok: true,
           data,
+          resumen: `${capitalizar(validacion.clasificacion)} · requiere revisión: ${validacion.requiere_revision.join(", ")}`,
           // La revisión confirmada habilita `contratos_registrar` en el siguiente turno.
           confirmacion: { motivo: `Revisar antes de registrar: ${validacion.requiere_revision.join(", ")}`, accion: "registrar" },
         });
       }
-      return ok(data);
+      return ok(data, `${capitalizar(validacion.clasificacion)} · ${validacion.motivo}`);
     });
   },
 };
@@ -127,7 +141,7 @@ export const registrar = {
   async execute(args: { mensaje_id: string; contrato?: Record<string, unknown>; confirmado?: boolean }, ctx: Contexto): Promise<string> {
     return ejecutar(ctx, "registrar", args.mensaje_id, async () => {
       const previo = (await leerProcesados(ctx.directory))[args.mensaje_id];
-      if (previo) return ok({ ...previo, ya_procesado: true });
+      if (previo) return ok({ ...previo, ya_procesado: true }, `El mensaje ya se había procesado (${previo.accion}${previo.id_contrato ? ` · ${previo.id_contrato}` : ""})`);
 
       const a = await analizar(ctx, args.mensaje_id, args.contrato);
       if (a.correcciones?.errores.length) return fallo(`Valores no aceptados: ${a.correcciones.errores.join("; ")}`);
@@ -136,6 +150,7 @@ export const registrar = {
         return JSON.stringify({
           ok: false,
           error: `requiere revisión: ${pendientes.join(", ")}`,
+          resumen: `No se registró: falta confirmar ${pendientes.join(", ")}`,
           confirmacion: { motivo: `Confirmar o corregir: ${pendientes.join(", ")}`, detalles: detalleRevision(a, pendientes) },
         });
       }
@@ -146,7 +161,16 @@ export const registrar = {
         valores: a.correcciones?.valores ?? null,
         validacion: a.validacion,
       });
-      return ok({ ...resultado, clasificacion: a.validacion.clasificacion, motivo: a.validacion.motivo, advertencias: a.validacion.advertencias });
+      const textos: Record<typeof resultado.accion, string> = {
+        alta: `Registrado ${resultado.id_contrato} en el maestro y archivado en SharePoint`,
+        actualizacion: `Actualizado ${resultado.id_contrato}: ${(a.validacion.diferencias ?? []).map((d) => d.campo).join(", ")}`,
+        sin_cambios: `Duplicado de ${resultado.id_contrato}: no se escribió nada`,
+        rechazado: `Rechazado: ${a.validacion.motivo}`,
+      };
+      return ok(
+        { ...resultado, clasificacion: a.validacion.clasificacion, motivo: a.validacion.motivo, advertencias: a.validacion.advertencias },
+        textos[resultado.accion],
+      );
     });
   },
 };
@@ -160,16 +184,41 @@ export const alertas = {
       const r = await generarAlertas(ctx.directory, args.hoy);
       const resumen = (filas: { id_contrato: string; cliente: string; fecha_fin: string; estado_poliza: string }[]) =>
         filas.map((f) => ({ id_contrato: f.id_contrato, cliente: f.cliente, fecha_fin: f.fecha_fin, estado_poliza: f.estado_poliza }));
-      return ok({
+      return ok(
+        {
         ruta: r.ruta,
         vencen: resumen(r.vencen),
         vencidos: resumen(r.vencidos),
         polizas_pendientes: resumen(r.polizas_pendientes),
         registrados_desde_corte: r.registrados_desde_corte.map((f) => ({ id_contrato: f.id_contrato, cliente: f.cliente, fecha_registro: f.fecha_registro })),
-      });
+        },
+        `${r.ruta}: ${r.vencen.length} por vencer en 60 días · ${r.polizas_pendientes.length} pólizas pendientes · ${r.registrados_desde_corte.length} registrados desde el corte`,
+      );
     });
   },
 };
+
+const capitalizar = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** Datos de un mensaje del buzón; si está dañado, se reporta como rechazado sin detener el lote. */
+async function describirMensaje(ctx: Contexto, id: string) {
+  try {
+    const correo = await leerCorreo(ctx.directory, id);
+    const tiene_contrato = (await adjuntoContrato(ctx.directory, correo)) !== null;
+    return {
+      id,
+      de: correo.de,
+      asunto: correo.asunto,
+      fecha: correo.fecha,
+      adjuntos: correo.adjuntos,
+      tiene_contrato,
+      ...(tiene_contrato ? {} : { clasificacion: "rechazado", motivo: "No trae contrato ni otrosí adjunto." }),
+    };
+  } catch (err) {
+    const motivo = err instanceof Error ? err.message : String(err);
+    return { id, de: null, asunto: null, fecha: null, adjuntos: [], tiene_contrato: false, clasificacion: "rechazado", motivo };
+  }
+}
 
 /** Para cada campo en revisión: valor propuesto, confianza y de dónde salió. */
 function detalleRevision(a: Awaited<ReturnType<typeof analizar>>, pendientes: string[]) {

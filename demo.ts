@@ -107,8 +107,9 @@ async function reporte() {
   verificar(r.ok && n("vencen") === 2 && n("registrados_desde_corte") === 3, "alertas: 2 por vencer y 3 registrados desde el corte");
 }
 
-// Determinismo: cada ejecución parte de `out/` vacío.
+// Determinismo: cada ejecución parte de `out/` vacío y de la misma fecha de referencia.
 await rm(join(config.directorio, "out"), { recursive: true, force: true });
+config.fechaReferencia = HOY;
 console.log("Demo reto 02 · Registro de contratos vigentes (sin modelo de lenguaje)");
 
 const buzon = await ejecutar(leer_buzon.execute({}, ctx));

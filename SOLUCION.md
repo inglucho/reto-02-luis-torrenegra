@@ -31,20 +31,22 @@ El registro de contratos vigentes murió el 30 de mayo de 2026 con la salida de 
 
 ## 3. Ciclo del agente
 
-El ciclo es propio (`src/core/agente.ts`, unas 200 líneas) y no depende del proveedor. Se agrega el mensaje del usuario a la sesión, cuyo historial solo crece. Luego se llama al modelo vía `AdaptadorLLM.enviar(mensajes, herramientas)`, se validan con zod los argumentos de cada herramienta, se ejecuta y se devuelve el resultado al modelo. Esto se repite hasta que el modelo responde sin herramientas. Cada llamada se emite al chat por SSE.
+El ciclo es propio (`src/core/agente.ts`, unas 250 líneas) y no depende del proveedor. Se agrega el mensaje del usuario a la sesión, cuyo historial solo crece. Luego se llama al modelo vía `AdaptadorLLM.enviar(mensajes, herramientas)`, se validan con zod los argumentos de cada herramienta, se ejecuta y se devuelve el resultado al modelo. Esto se repite hasta que el modelo responde sin herramientas. Cada llamada se emite al chat por SSE.
 
-**Topes.** Hay un máximo de 25 rondas por turno. En la última, se le pide al modelo cerrar con lo que tiene y lo que falta. También hay un tope de tokens por sesión y un timeout al proveedor; los tres son configurables.
+**Topes (CA1 y costo).** Hay un máximo de 25 rondas por turno: en la última, los resultados van con una nota que le pide al modelo cerrar con lo que tiene. Si aun así pide más herramientas, no se ejecutan y el turno termina con un resumen determinista de lo hecho y lo que falta. Para el costo hay tres topes configurables: tokens por conversación, **tokens por día para todo el servidor** (el link es público y cualquiera podría abrir conversaciones nuevas) y **mensajes por IP** en una ventana de minutos. A eso se suma un timeout al proveedor.
 
 **Revisión humana (CA3 y RN5), en tres capas:**
 1. **La herramienta decide.** `contratos_validar` y `contratos_registrar` marcan `confirmacion` cuando hay campos con confianza < 0,8 o conflictos con el maestro. `contratos_registrar` no escribe sin `confirmado: true`.
-2. **El backend garantiza, por acción.** `confirmado: true` solo se acepta si el mensaje anterior del usuario es una confirmación explícita, sin negación ("confirmo el valor 0 y la fecha fin 2027-08-31" sí cuenta). Si el modelo lo usa por su cuenta, el backend lo bloquea.
+2. **El backend garantiza, por acción y por caso.** Cada confirmación queda ligada a la herramienta que la pidió y al caso (`caso` o `mensaje_id`). Confirmar msg-006 no autoriza registrar otro mensaje ("confirmo el valor 0 y la fecha fin 2027-08-31" sí cuenta como confirmación). Una validación puede declarar qué acción habilita (por ejemplo, validar habilita crear o registrar). `confirmado: true` solo pasa si el siguiente mensaje del usuario confirma sin negar; si el modelo lo usa por su cuenta, el backend lo bloquea. La detección reconoce "sí" con tilde y frases como "confirmo, no hay más cambios".
 3. **Al registrar, el modelo solo puede cambiar campos de baja confianza.** Los demás deben coincidir con lo extraído del documento: el modelo propone y la analista confirma, pero nadie altera lo que el documento dice con claridad.
-
-**Confirmación ligada a la acción.** Cada confirmación queda asociada a la acción que la pidió; una validación puede declarar qué acción habilita (contratos_validar habilita contratos_registrar). Así, un "sí" a otra pregunta nunca autoriza una acción distinta. El ajuste surgió de una prueba real en el reto 01 y se aplicó al núcleo de los tres retos.
 
 **Errores (CA5 y HU-6).** Un mensaje malo devuelve `{ ok: false, error }` y el lote sigue. En la prueba real, cuando se agotó la cuota gratuita, el chat mostró *"Se alcanzó el límite de uso gratuito… espera un minuto"* y la sesión siguió viva.
 
-**Bitácora (RN7).** Cada herramienta escribe `{ ts, herramienta, mensaje_id, ok, resumen }` en `out/log.jsonl`, así queda registro también cuando se ejecuta desde `demo.ts`, sin el agente.
+**Bitácora (RN7 y CA4).** Cada herramienta escribe `{ ts, herramienta, mensaje_id, ok, resumen }` en `out/log.jsonl`, así queda registro también cuando se ejecuta desde `demo.ts`. El núcleo agrega, con el mismo formato, las llamadas que no llegan a ejecutarse (herramienta desconocida, argumentos inválidos, confirmación bloqueada o fuera del tope), sin duplicar las demás.
+
+**Adaptador LLM.** La interfaz es `enviar(mensajes, herramientas, opciones)`. El tercer parámetro lleva el system prompt y el callback de streaming: el contrato del PRD no lo nombra, pero cualquier proveedor lo necesita. Cambiar de proveedor no toca el ciclo.
+
+**Interfaz de chat.** La pantalla inicial propone instrucciones de ejemplo. Cada respuesta muestra los pasos del agente: la herramienta, sus argumentos y un resumen en lenguaje natural que escribe la propia herramienta (el JSON completo queda plegado). Las respuestas se renderizan en Markdown escapando todo el HTML, y la confirmación se destaca con botones.
 
 ## 4. Elección del modelo
 
@@ -144,10 +146,21 @@ El umbral de RN5 es 0,8. Con esta escala, msg-006 deja en revisión exactamente 
 | 5 | **Gemini en capa gratuita con dos modelos de respaldo** | Un modelo de pago | Costo cero; el respaldo encadenado compensa la cuota y la saturación de la capa gratuita |
 | 6 | **CSV leído y escrito con un parser RFC 4180 propio** (30 líneas) | Una dependencia de CSV | Los objetos tienen comas y comillas. El parser es pequeño, está probado y evita otra dependencia |
 
+### Dependencias
+
+| Dependencia | Para qué | Alternativa descartada |
+|---|---|---|
+| `zod` | Esquemas de los argumentos de herramientas y de los datos (obligatorio por el PRD) | — |
+| `@google/genai` | SDK oficial de Gemini, el proveedor por defecto | Llamar la API REST a mano: más código propio y sin tipos |
+| `@anthropic-ai/sdk` | Segundo adaptador, para demostrar que el proveedor se cambia sin tocar el ciclo | — |
+| `typescript`, `@types/bun` (solo desarrollo) | Verificación de tipos estricta | — |
+
+Bun aporta el servidor HTTP, el empaquetado del front, el test runner y la lectura de archivos, así que no hicieron falta Express, Vite ni Jest.
+
 ## 8. Supuestos
 
 1. El maestro de trabajo es una copia en `out/sharepoint/`, hecha en la primera ejecución. El fixture no se modifica nunca (RN6).
-2. `fecha_registro` es la fecha real del registro, no la fecha de referencia `hoy` de las alertas.
+2. `fecha_registro` es la fecha de referencia del negocio (`FECHA_REFERENCIA`; vacía, hoy). La demo usa 2026-09-03, la misma fecha de las alertas, para que el reporte sea coherente.
 3. Si la firma solo indica mes y año, el inicio es el día 1 de ese mes (confianza 0,8). En msg-006, la analista corrige `fecha_fin` a 2027-08-31, como en el ejemplo del PRD.
 4. El plazo en meses sigue la convención de los demás contratos: fin = inicio + N meses − 1 día.
 5. Un contrato marco que exige póliza para las órdenes que superen un monto se registra con `requiere_poliza = true` y estado `pendiente`, para que aparezca en las alertas.
@@ -156,7 +169,8 @@ El umbral de RN5 es 0,8. Con esta escala, msg-006 deja en revisión exactamente 
 8. El remitente desconocido se registra con `comercial` vacío y una advertencia, sin bloquear.
 9. Los documentos se archivan con su extensión original (`.txt` en los fixtures). Un otrosí se archiva junto al contrato, sin reemplazarlo: `<id>-otrosi-<mensaje>.txt`.
 10. El reporte de alertas añade una lista de contratos ya vencidos sin renovación. No la pide el PRD, pero es el riesgo más alto que muestran los datos (CT-2025-018 y CT-2026-002).
-11. Las llamadas a herramientas con argumentos inválidos se muestran en el chat y vuelven al modelo, pero no quedan en `out/log.jsonl`, porque el log lo escriben las propias herramientas al ejecutarse.
+11. El contrato extraído se entrega como `campos.<nombre> = { valor, confianza, evidencia }`: la confianza por campo que pide HU-2 necesita esa forma. El esquema plano de la sección 7.2 es el de la fila del maestro, que es lo que se registra.
+12. El argumento `contrato` de validar y registrar es opcional y parcial: solo lleva los valores que la analista confirma o corrige, con un esquema zod por campo. Si se omite, se usa lo extraído del documento.
 
 ## 9. Cobertura
 
@@ -180,7 +194,7 @@ Usé **Claude Code** (modelo Claude Opus 5.5) como asistente de desarrollo:
 | Análisis | Leyó el PRD y los 6 mensajes y detectó las trampas de los datos: NIT compartido con otro contrato, monto en formato estadounidense, otrosí que obliga a ampliar pólizas y firma sin día | Validar la tabla de resultados esperados |
 | Reutilización | Partió del núcleo común construido para el reto 03 (ciclo, adaptador LLM, chat) | La estrategia de un núcleo para los tres retos |
 | Extracción | Escribió las heurísticas y la escala de confianza; ajustó las confianzas contra los fixtures hasta que msg-006 dejó en revisión exactamente `valor` y `fecha_fin` | Que cada confianza tuviera una justificación, no solo que cuadrara |
-| Tests | Escribió 42 tests | — |
+| Tests | Escribió los tests | — |
 | Documentación | Redactó README, CLAUDE.md y este documento, incluida la regla de gobierno | La regla de gobierno como propuesta propia |
 
 **Lo que descarté de lo propuesto o lo que corregí:**

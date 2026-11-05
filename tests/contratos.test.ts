@@ -147,6 +147,15 @@ describe("herramientas", () => {
     expect(!vacio.ok && vacio.error).toContain("vacío");
   });
 
+  test("un correo dañado no detiene el buzón: se reporta como rechazado (HU-6)", async () => {
+    await mkdir(join(dir, "fixtures/reto-02/buzon/msg-099"), { recursive: true });
+    await writeFile(join(dir, "fixtures/reto-02/buzon/msg-099/correo.json"), "{ roto");
+    const r = await correr(leer_buzon.execute({}, ctx()));
+    const mensajes = r.ok ? (r.data as { mensajes: { id: string; clasificacion?: string }[] }).mensajes : [];
+    expect(mensajes).toHaveLength(7);
+    expect(mensajes.find((m) => m.id === "msg-099")).toMatchObject({ clasificacion: "rechazado" });
+  });
+
   test("toda ejecución deja su línea en out/log.jsonl (RN7)", async () => {
     await validar.execute({ mensaje_id: "msg-002" }, ctx());
     const linea = JSON.parse((await Bun.file(join(dir, "out/log.jsonl")).text()).trim());

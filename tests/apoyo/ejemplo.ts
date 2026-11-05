@@ -3,7 +3,7 @@ import { type Contexto, fallo, ok, pideConfirmacion } from "../../src/core/herra
 
 /**
  * Herramientas mínimas para probar el núcleo del agente sin depender del dominio de
- * órdenes de compra. El modelo ve estas
+ * cada reto. El modelo ve estas
  * herramientas como `ejemplo_consultar` y `ejemplo_aprobar`.
  */
 

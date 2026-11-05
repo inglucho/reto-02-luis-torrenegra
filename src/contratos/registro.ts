@@ -1,4 +1,5 @@
 import { appendFile, mkdir } from "node:fs/promises";
+import { config } from "../config";
 import { dirname, extname, join } from "node:path";
 import { aCelda } from "./clasificacion";
 import { escribirCsv } from "./csv";
@@ -22,7 +23,8 @@ interface EntradaRegistro {
   validacion: Validacion;
 }
 
-const hoy = () => new Date().toISOString().slice(0, 10);
+/** Fecha de registro: la de referencia del negocio (hoy, o la fijada para reproducir la prueba). */
+const hoy = () => config.fechaReferencia;
 
 /**
  * HU-4: escribe en el SharePoint simulado según la clasificación. Quien llama ya
