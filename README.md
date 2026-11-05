@@ -2,7 +2,7 @@
 
 Agente que actúa como **punto único de recepción** del buzón de contratos. Lee cada correo, extrae los datos del contrato con un nivel de confianza por campo y lo clasifica como nuevo, actualización (otrosí), duplicado o rechazado. Luego lo registra en el maestro de un SharePoint simulado, archiva el documento y produce las alertas de vencimiento y de pólizas. Lo dudoso (confianza < 0,8) no se registra hasta que la analista lo confirme.
 
-- **Link de prueba:** _pendiente de despliegue_
+- **Link de prueba:** https://reto-02-luis-torrenegra.onrender.com (Render, plan gratuito: la primera visita puede tardar ~50 s en despertar)
 - **Planteamiento de la solución y regla de gobierno:** [`SOLUCION.md`](SOLUCION.md)
 - **PRD del reto:** entregado por Periferia IT Group; no se publica en este repositorio
 
