@@ -1,6 +1,6 @@
 # Reto 02 — Registro de Contratos Vigentes (prueba técnica Periferia)
 
-Agente conversacional en TypeScript + Bun. El PRD está en `docs/PRD.md`; su sección 6 fija la arquitectura (nombres de archivo, contrato de herramientas, API) y la 7 el esquema del maestro y las reglas RN1–RN7. El PRD manda sobre cualquier suposición.
+Agente conversacional en TypeScript + Bun. El PRD está en `docs/PRD.md` (copia local, no versionada: es material de la prueba); su sección 6 fija la arquitectura (nombres de archivo, contrato de herramientas, API) y la 7 el esquema del maestro y las reglas RN1–RN7. El PRD manda sobre cualquier suposición.
 
 ## Comandos
 
